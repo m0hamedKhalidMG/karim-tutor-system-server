@@ -8,9 +8,11 @@ const notificationLogSchema = new mongoose.Schema({
   sentAt: { type: Date, default: Date.now },
   status: { type: String, enum: ['sent', 'failed'], required: true },
   errorMessage: { type: String, default: null },
-  trigger: { type: String, enum: ['manual', 'per_session', 'weekly', 'monthly'] },
+  trigger: { type: String, enum: ['manual', 'per_session', 'weekly', 'monthly', 'exam_result', 'payment_late'] },
   month: { type: String },
-  weekOf: { type: String }
+  weekOf: { type: String },
+  examId: { type: mongoose.Schema.Types.ObjectId, ref: 'Exam' },
+  examResultId: { type: mongoose.Schema.Types.ObjectId, ref: 'ExamResult' }
 });
 
 notificationLogSchema.index({ studentId: 1, sentAt: -1 });

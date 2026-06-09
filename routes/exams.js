@@ -3,7 +3,12 @@ const router = express.Router();
 const Exam = require('../models/Exam');
 const ExamResult = require('../models/ExamResult');
 const Student = require('../models/Student');
+const NotificationLog = require('../models/NotificationLog');
+const NotificationRule = require('../models/NotificationRule');
 const requireTeacher = require('../middleware/requireTeacher');
+const { formatEgyptianPhone } = require('../utils/formatPhone');
+const { resolveTemplate } = require('../utils/resolveTemplate');
+const { sendWhatsApp } = require('../utils/sendWhatsApp');
 
 function stripAnswers(exam) {
   const obj = exam.toObject ? exam.toObject() : exam;
@@ -187,6 +192,43 @@ router.post('/:id/submit', async (req, res, next) => {
       flagged: !!(flagReasons && flagReasons.length),
       flagReasons: flagReasons || []
     });
+
+    // Auto-send notification to parent if studentId exists and rule is active
+    if (studentId) {
+      try {
+        const student = await Student.findById(studentId);
+        if (student && student.parentPhone) {
+          const rule = await NotificationRule.findOne({ trigger: 'exam_result', isActive: true });
+          const defaultTemplates = {
+            exam_result: `السلام عليكم ورحمة الله،\nنود إعلامكم بنتيجة امتحان {{examTitle}} لابنكم/ابنتكم {{studentName}} من {{grade}}.\nالدرجة: {{score}} من {{total}} ({{percentage}}%).\nمع تحيات الأستاذ {{teacherName}} 🎓`
+          };
+          const template = rule?.messageTemplate || defaultTemplates.exam_result;
+          const phone = formatEgyptianPhone(student.parentPhone);
+          const message = resolveTemplate(template, {
+            studentName: student.fullName,
+            grade: student.grade,
+            examTitle: exam.title,
+            score: String(score),
+            total: String(total),
+            percentage: String(percentage),
+            teacherName: 'كريم مصطفى'
+          });
+          const waResult = await sendWhatsApp(phone, message);
+          await NotificationLog.create({
+            studentId: student._id,
+            parentPhone: phone,
+            message,
+            status: waResult.success ? 'sent' : 'failed',
+            errorMessage: waResult.success ? null : waResult.error,
+            trigger: 'exam_result',
+            examId: exam._id,
+            examResultId: result._id
+          });
+        }
+      } catch (notifyErr) {
+        console.error('Exam result notification failed:', notifyErr);
+      }
+    }
 
     res.json({ score, total, percentage });
   } catch (err) {

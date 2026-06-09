@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const notificationRuleSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: false },
-  trigger: { type: String, enum: ['per_session', 'weekly', 'monthly'], required: true },
+  trigger: { type: String, enum: ['per_session', 'weekly', 'monthly', 'exam_result', 'payment_late'], required: true },
   grade: { type: String, default: 'all' },
   messageTemplate: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },

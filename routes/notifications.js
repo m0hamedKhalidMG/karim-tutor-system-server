@@ -55,7 +55,9 @@ function countScheduledSessionsForGrade(grade, start, end, schedules) {
 const defaultTemplates = {
   per_session: `السلام عليكم ورحمة الله،\nنود إعلامكم بأن ابنكم/ابنتكم {{studentName}} من {{grade}} لم يحضر حصة اليوم {{date}}.\nيرجى التواصل مع الأستاذ {{teacherName}} لمعرفة التفاصيل.\nشكراً لتعاونكم 🙏`,
   weekly: `السلام عليكم ورحمة الله،\nتقرير الحضور الأسبوعي لابنكم/ابنتكم {{studentName}} من {{grade}}:\nعدد الغيابات هذا الأسبوع: {{absenceCount}} من أصل {{totalSessions}} حصص.\nللاستفسار تواصلوا مع الأستاذ {{teacherName}}.\nشكراً 🙏`,
-  monthly: `السلام عليكم ورحمة الله،\nتقرير الحضور الشهري لابنكم/ابنتكم {{studentName}} من {{grade}}:\nإجمالي الغيابات هذا الشهر: {{absenceCount}} من أصل {{totalSessions}} حصص.\nيرجى الاهتمام بانتظام الحضور للحفاظ على مستوى الطالب.\nمع تحيات الأستاذ {{teacherName}} 🎓`
+  monthly: `السلام عليكم ورحمة الله،\nتقرير الحضور الشهري لابنكم/ابنتكم {{studentName}} من {{grade}}:\nإجمالي الغيابات هذا الشهر: {{absenceCount}} من أصل {{totalSessions}} حصص.\nيرجى الاهتمام بانتظام الحضور للحفاظ على مستوى الطالب.\nمع تحيات الأستاذ {{teacherName}} 🎓`,
+  exam_result: `السلام عليكم ورحمة الله،\nنود إعلامكم بنتيجة امتحان {{examTitle}} لابنكم/ابنتكم {{studentName}} من {{grade}}.\nالدرجة: {{score}} من {{total}} ({{percentage}}%).\nمع تحيات الأستاذ {{teacherName}} 🎓`,
+  payment_late: `السلام عليكم ورحمة الله،\nنود تذكيركم بأن اشتراك ابنكم/ابنتكم {{studentName}} من {{grade}} عن شهر {{month}} لم يتم سداده بعد.\nالمبلغ المستحق: {{amount}} جنيه.\nيرجى السداد في أقرب وقت ممكن.\nمع تحيات الأستاذ {{teacherName}} 🎓`
 };
 
 router.get('/absent-report', requireTeacher, async (req, res, next) => {
@@ -161,6 +163,59 @@ router.get('/absent-report', requireTeacher, async (req, res, next) => {
 
     const filtered = result.filter(Boolean);
     res.json({ success: true, data: filtered });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/payment-late-report', requireTeacher, async (req, res, next) => {
+  try {
+    const { month, grade, groupId } = req.query;
+    if (!month) {
+      return res.status(400).json({ success: false, message: 'month required' });
+    }
+
+    const Payment = require('../models/Payment');
+    const paymentFilter = { month, isPaid: false };
+    const payments = await Payment.find(paymentFilter)
+      .populate({ path: 'studentId', select: 'fullName grade groupId parentPhone', populate: { path: 'groupId', select: 'name' } });
+
+    // Apply grade/group filters
+    let filtered = payments;
+    if (grade && grade !== 'all') {
+      const normalized = grade.replace(/^Grade\s*/, '');
+      filtered = filtered.filter(p => {
+        const g = p.studentId?.grade || '';
+        return g === grade || g === normalized || g === `Grade ${normalized}`;
+      });
+    }
+    if (groupId) {
+      filtered = filtered.filter(p => String(p.studentId?.groupId?._id) === groupId);
+    }
+
+    // Check if already notified for this month
+    const result = await Promise.all(
+      filtered.map(async (p) => {
+        const student = p.studentId;
+        if (!student) return null;
+        const logFilter = { studentId: student._id, trigger: 'payment_late', month, status: 'sent' };
+        const alreadyNotified = await NotificationLog.exists(logFilter);
+        return {
+          student: {
+            _id: student._id,
+            fullName: student.fullName,
+            grade: student.grade,
+            groupId: student.groupId,
+            parentPhone: student.parentPhone
+          },
+          amount: p.amount || 0,
+          month: p.month,
+          alreadyNotified: !!alreadyNotified
+        };
+      })
+    );
+
+    res.json({ success: true, data: result.filter(Boolean) });
   } catch (err) {
     next(err);
   }
@@ -403,6 +458,153 @@ router.post('/send-monthly', requireTeacher, async (req, res, next) => {
   }
 });
 
+router.post('/send-exam-result', requireTeacher, async (req, res, next) => {
+  try {
+    const { examId, resultIds } = req.body;
+    if (!examId || !resultIds || !resultIds.length) {
+      return res.status(400).json({ success: false, message: 'examId and resultIds required' });
+    }
+
+    const exam = await require('../models/Exam').findById(examId);
+    if (!exam) return res.status(404).json({ success: false, message: 'Exam not found' });
+
+    const rule = await NotificationRule.findOne({ trigger: 'exam_result', isActive: true });
+    const template = rule?.messageTemplate || defaultTemplates.exam_result;
+
+    const results = [];
+    const ExamResult = require('../models/ExamResult');
+    for (const rid of resultIds) {
+      const result = await ExamResult.findById(rid).populate('studentId');
+      if (!result || !result.studentId) {
+        results.push({ resultId: rid, status: 'failed', error: 'Result or student not found' });
+        continue;
+      }
+      const student = result.studentId;
+      if (!student.parentPhone) {
+        results.push({ resultId: rid, studentId: student._id, studentName: student.fullName, status: 'failed', error: 'No parent phone' });
+        await NotificationLog.create({
+          studentId: student._id,
+          parentPhone: '',
+          message: '',
+          status: 'failed',
+          errorMessage: 'No parent phone',
+          trigger: 'exam_result',
+          examId: exam._id,
+          examResultId: result._id
+        });
+        continue;
+      }
+
+      const phone = formatEgyptianPhone(student.parentPhone);
+      const message = resolveTemplate(template, {
+        studentName: student.fullName,
+        grade: student.grade,
+        examTitle: exam.title,
+        score: String(result.score),
+        total: String(result.totalQuestions),
+        percentage: String(result.percentageScore),
+        teacherName: 'كريم مصطفى'
+      });
+
+      const waResult = await sendWhatsApp(phone, message);
+      await NotificationLog.create({
+        studentId: student._id,
+        parentPhone: phone,
+        message,
+        status: waResult.success ? 'sent' : 'failed',
+        errorMessage: waResult.success ? null : waResult.error,
+        trigger: 'exam_result',
+        examId: exam._id,
+        examResultId: result._id
+      });
+
+      results.push({
+        resultId: rid,
+        studentId: student._id,
+        studentName: student.fullName,
+        phone,
+        status: waResult.success ? 'sent' : 'failed',
+        error: waResult.success ? null : waResult.error
+      });
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    res.json({ success: true, data: { results } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/send-payment_late', requireTeacher, async (req, res, next) => {
+  try {
+    const { month, grade: gradeFilter, studentIds } = req.body;
+    if (!month) {
+      return res.status(400).json({ success: false, message: 'month required' });
+    }
+
+    const Payment = require('../models/Payment');
+    const rule = await NotificationRule.findOne({ trigger: 'payment_late', isActive: true });
+    const template = rule?.messageTemplate || defaultTemplates.payment_late;
+
+    let paymentFilter = { month, isPaid: false };
+    if (studentIds && studentIds.length > 0) {
+      paymentFilter.studentId = { $in: studentIds };
+    }
+    const payments = await Payment.find(paymentFilter).populate('studentId');
+
+    const results = [];
+    for (const payment of payments) {
+      const student = payment.studentId;
+      if (!student) {
+        results.push({ paymentId: payment._id, status: 'failed', error: 'Student not found' });
+        continue;
+      }
+      if (gradeFilter && gradeFilter !== 'all' && student.grade !== gradeFilter) {
+        continue;
+      }
+      if (!student.parentPhone) {
+        results.push({ studentId: student._id, studentName: student.fullName, status: 'failed', error: 'No parent phone' });
+        await NotificationLog.create({
+          studentId: student._id,
+          parentPhone: '',
+          message: '',
+          status: 'failed',
+          errorMessage: 'No parent phone',
+          trigger: 'payment_late',
+          month
+        });
+        continue;
+      }
+      const phone = formatEgyptianPhone(student.parentPhone);
+      const message = resolveTemplate(template, {
+        studentName: student.fullName,
+        grade: student.grade,
+        month,
+        amount: String(payment.amount || 0),
+        teacherName: 'كريم مصطفى'
+      });
+
+      const waResult = await sendWhatsApp(phone, message);
+      await NotificationLog.create({
+        studentId: student._id,
+        parentPhone: phone,
+        message,
+        status: waResult.success ? 'sent' : 'failed',
+        errorMessage: waResult.success ? null : waResult.error,
+        trigger: 'payment_late',
+        month
+      });
+
+      results.push({ studentId: student._id, studentName: student.fullName, phone, status: waResult.success ? 'sent' : 'failed', error: waResult.error });
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    res.json({ success: true, data: { results } });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/logs', requireTeacher, async (req, res, next) => {
   try {
     const { studentId, month, trigger, status, page = 1, limit = 20 } = req.query;
@@ -482,7 +684,7 @@ router.get('/stats', requireTeacher, async (req, res, next) => {
     const failedThisMonth = await NotificationLog.countDocuments({ ...filter, status: 'failed' });
     const distinctStudents = await NotificationLog.distinct('studentId', filter);
     const byTrigger = {};
-    for (const t of ['manual', 'per_session', 'weekly', 'monthly']) {
+    for (const t of ['manual', 'per_session', 'weekly', 'monthly', 'exam_result', 'payment_late']) {
       byTrigger[t] = await NotificationLog.countDocuments({ ...filter, trigger: t });
     }
     res.json({
