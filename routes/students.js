@@ -25,11 +25,12 @@ router.get('/students', requireTeacher, async (req, res, next) => {
 
 router.post('/students', requireTeacher, async (req, res, next) => {
   try {
-    const { fullName, grade, phone, parentPhone, qrCode } = req.body;
+    const { fullName, grade, groupId, phone, parentPhone, qrCode } = req.body;
     const parentAccessToken = generateParentToken();
     const student = await Student.create({
       fullName,
       grade,
+      groupId,
       phone,
       parentPhone,
       qrCode,
