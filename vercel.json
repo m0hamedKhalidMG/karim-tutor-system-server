@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index.js" }
+  ],
+  "env": {
+    "NODE_ENV": "production",
+    "BOT_SERVER_URL": "http://54.146.39.28"
+  }
+}

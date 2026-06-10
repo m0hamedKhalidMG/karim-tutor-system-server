@@ -35,13 +35,29 @@ app.use('/api/notifications', notificationRoutes);
 
 app.use(errorHandler);
 
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => {
-    console.log('MongoDB connected');
-    const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-  })
-  .catch(err => {
-    console.error('MongoDB connection error:', err);
-    process.exit(1);
-  });
+// Cached MongoDB connection for serverless environments
+let cached = global.mongoose;
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null };
+}
+
+async function connectDB() {
+  if (cached.conn) {
+    return cached.conn;
+  }
+  if (!cached.promise) {
+    cached.promise = mongoose.connect(process.env.MONGO_URI).then(() => {
+      console.log('MongoDB connected');
+      return mongoose.connection;
+    });
+  }
+  cached.conn = await cached.promise;
+  return cached.conn;
+}
+
+// Connect immediately but don't block export
+connectDB().catch(err => {
+  console.error('MongoDB connection error:', err);
+});
+
+module.exports = app;

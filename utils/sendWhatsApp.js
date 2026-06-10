@@ -3,8 +3,9 @@ const BOT_API_SECRET = process.env.BOT_API_SECRET || 'karim_bot_secret';
 
 async function sendWhatsApp(phone, messageText) {
   try {
+    const baseUrl = BOT_SERVER_URL.replace(/\/$/, '');
     console.log(`[WhatsApp] Sending to ${phone}: ${messageText.slice(0, 50)}...`);
-    const response = await fetch(`${BOT_SERVER_URL}/send`, {
+    const response = await fetch(`${baseUrl}/send`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

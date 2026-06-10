@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: 'karim-tutor-server',
-      script: './app.js',
+      script: './server.js',
       instances: 1,
       exec_mode: 'fork',
       env: {
