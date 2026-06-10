@@ -17,10 +17,11 @@ router.post('/login', async (req, res, next) => {
       return res.status(401).json({ message: 'Invalid password' });
     }
     const token = jwt.sign({ teacher: true }, JWT_SECRET, { expiresIn: '7d' });
+    const isProduction = process.env.NODE_ENV === 'production';
     res.cookie('token', token, {
       httpOnly: true,
-      secure: false,
-      sameSite: 'lax',
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
     res.json({ message: 'Logged in successfully' });
