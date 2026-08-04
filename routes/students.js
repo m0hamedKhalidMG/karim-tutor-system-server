@@ -56,7 +56,7 @@ router.post('/students', requireTeacher, async (req, res, next) => {
 
 router.get('/students/:id', requireTeacher, async (req, res, next) => {
   try {
-    const student = await Student.findById(req.params.id);
+    const student = await Student.findById(req.params.id).populate('groupId', 'name grade');
     if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
     res.json({ success: true, data: student });
   } catch (err) {
@@ -68,7 +68,14 @@ router.put('/students/:id', requireTeacher, async (req, res, next) => {
   try {
     const updates = { ...req.body };
     if (updates.qrCode != null) updates.qrCode = String(updates.qrCode).trim();
-    if (!updates.groupId) delete updates.groupId;
+    if (!updates.groupId) {
+      // Allow clearing group by sending empty value
+      if (Object.prototype.hasOwnProperty.call(updates, 'groupId')) {
+        updates.groupId = null;
+      } else {
+        delete updates.groupId;
+      }
+    }
 
     if (updates.qrCode) {
       const existing = await Student.findOne({ qrCode: updates.qrCode, _id: { $ne: req.params.id } });
@@ -77,7 +84,8 @@ router.put('/students/:id', requireTeacher, async (req, res, next) => {
       }
     }
 
-    const student = await Student.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
+    const student = await Student.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true })
+      .populate('groupId', 'name grade');
     if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
     res.json({ success: true, data: student });
   } catch (err) {
