@@ -25,11 +25,23 @@ router.get('/students', requireTeacher, async (req, res, next) => {
 
 router.post('/students', requireTeacher, async (req, res, next) => {
   try {
-    const { fullName, grade, groupId, phone, parentPhone, qrCode } = req.body;
+    const { fullName, grade, phone, parentPhone } = req.body;
+    const qrCode = String(req.body.qrCode || '').trim();
+    const groupId = req.body.groupId || undefined;
+
+    if (!fullName?.trim() || !grade?.trim() || !qrCode) {
+      return res.status(400).json({ message: 'fullName, grade, and qrCode are required' });
+    }
+
+    const existing = await Student.findOne({ qrCode });
+    if (existing) {
+      return res.status(409).json({ message: 'This QR code is already used by another student' });
+    }
+
     const parentAccessToken = generateParentToken();
     const student = await Student.create({
-      fullName,
-      grade,
+      fullName: fullName.trim(),
+      grade: grade.trim(),
       groupId,
       phone,
       parentPhone,
@@ -54,7 +66,18 @@ router.get('/students/:id', requireTeacher, async (req, res, next) => {
 
 router.put('/students/:id', requireTeacher, async (req, res, next) => {
   try {
-    const student = await Student.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const updates = { ...req.body };
+    if (updates.qrCode != null) updates.qrCode = String(updates.qrCode).trim();
+    if (!updates.groupId) delete updates.groupId;
+
+    if (updates.qrCode) {
+      const existing = await Student.findOne({ qrCode: updates.qrCode, _id: { $ne: req.params.id } });
+      if (existing) {
+        return res.status(409).json({ success: false, message: 'This QR code is already used by another student' });
+      }
+    }
+
+    const student = await Student.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
     if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
     res.json({ success: true, data: student });
   } catch (err) {
