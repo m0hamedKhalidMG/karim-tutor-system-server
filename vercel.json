@@ -5,6 +5,6 @@
   ],
   "env": {
     "NODE_ENV": "production",
-    "BOT_SERVER_URL": "http://98.91.194.91:5001"
+    "BOT_SERVER_URL": "http://98.91.194.91"
   }
 }
