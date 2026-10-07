@@ -77,7 +77,7 @@ router.post('/scan', requireTeacher, async (req, res, next) => {
     }
 
     const existing = await Attendance.findOne({
-      studentId: student._id,
+      $or: [{ studentId: student._id }, { student: student._id }],
       date: { $gte: todayStart, $lte: todayEnd }
     });
 
@@ -91,6 +91,7 @@ router.post('/scan', requireTeacher, async (req, res, next) => {
 
     await Attendance.create({
       studentId: student._id,
+      student: student._id,
       date: now.toDate(),
       status: 'present',
       markedVia: 'qr'
@@ -145,6 +146,7 @@ router.post('/manual', requireTeacher, async (req, res, next) => {
     const { studentId, date, status } = req.body;
     const record = await Attendance.create({
       studentId,
+      student: studentId,
       date: new Date(date),
       status,
       markedVia: 'manual'
@@ -370,13 +372,14 @@ router.post('/auto-mark-absent', requireTeacher, async (req, res, next) => {
 
       for (const student of students) {
         const existing = await Attendance.findOne({
-          studentId: student._id,
+          $or: [{ studentId: student._id }, { student: student._id }],
           date: { $gte: todayStart, $lte: todayEnd }
         });
 
         if (!existing) {
           await Attendance.create({
             studentId: student._id,
+            student: student._id,
             date: targetDate.toDate(),
             status: 'absent',
             markedVia: 'manual'

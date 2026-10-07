@@ -78,16 +78,21 @@ router.get('/absent-report', requireTeacher, async (req, res, next) => {
     }
 
     const filter = { date: { $gte: start, $lte: end }, status: 'absent' };
-    const absences = await Attendance.find(filter).populate({ path: 'studentId', select: 'fullName grade groupId parentPhone', populate: { path: 'groupId', select: 'name' } }).sort({ date: -1 });
+    const studentSelection = 'fullName grade groupId parentPhone';
+    const absences = await Attendance.find(filter)
+      .populate({ path: 'studentId', select: studentSelection, populate: { path: 'groupId', select: 'name' } })
+      .populate({ path: 'student', select: studentSelection, populate: { path: 'groupId', select: 'name' } })
+      .sort({ date: -1 });
 
     // Group by student
     const byStudent = {};
     absences.forEach(a => {
-      const sid = a.studentId?._id?.toString();
+      const student = a.studentId || a.student;
+      const sid = student?._id?.toString();
       if (!sid) return;
       if (!byStudent[sid]) {
         byStudent[sid] = {
-          student: a.studentId,
+          student,
           absenceCount: 0,
           dates: []
         };
